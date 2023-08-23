@@ -166,9 +166,127 @@ fn get_chain_from_config() -> Result<Chain, Error> {
     Ok(config.chain)
 }
 
+fn get_config() -> Result<Config, Error> {
+    let data = fs::read_to_string("config.json")?;
+    let config: Config = serde_json::from_str(&data)?;
+
+    Ok(config)
+}
+
 fn write_config(config: Config) {
     let json_data = serde_json::to_string_pretty(&config).expect("Failed to serialize to JSON");
     let mut file = File::create("config.json").expect("Failed to open file");
     file.write_all(json_data.as_bytes())
         .expect("Failed to write data");
 }
+
+// async fn arbitrage() -> web3::Result<()> {
+
+//     let transport: Http = match match get_chain_from_config() {
+//         Ok(chain) => chain,
+//         Err(_) => Chain::Ethereum,
+//     } {
+//         Chain::Ethereum => web3::transports::http::Http::new("https://rpc.api.moonbeam.network")?,
+//         Chain::Polygon => web3::transports::http::Http::new("https://rpc.api.moonbeam.network")?,
+//         Chain::Binance => web3::transports::http::Http::new("https://rpc.api.moonbeam.network")?,
+//     };
+//     let web3: Web3<Http> = web3::Web3::new(transport);
+//     let config = get_config().expect("expected a config file");
+
+//     loop {
+//         let pair_address = get_pair_address(&web3, &config.token_address_1, &config.token_address_2).await?;
+//         // Get prices from two different DEXes
+//         let price_1 = get_price(&web3, &pair_address).await?;
+//         let price_2 = get_price(&web3, &pair_address).await?;
+
+//         // Check for arbitrage opportunity
+//         if price_1 < price_2 {
+//             execute_trade(&web3, &config.token_address_1, &config.token_address_2, price_1).await?;
+//         } else if price_2 < price_1 {
+//             execute_trade(&web3, &config.token_address_1, &config.token_address_2, price_2).await?;
+//         }
+
+//         tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+//     }
+
+//     Ok(())
+// }
+
+// async fn get_pair_address(
+//     web3: &Web3<Http>,
+//     token_a: &Address,
+//     token_b: &Address,
+// ) -> web3::Result<Address> {
+//     let factory_address: Address = UNISWAP_FACTORY_ADDRESS.parse()?;
+//     let factory_contract = Contract::from_json(
+//         web3.eth(),
+//         factory_address,
+//         include_bytes!("path_to_your/UniswapV2Factory.abi"),
+//     );
+
+//     let result: Address = factory_contract
+//         .query("getPair", (token_a, token_b), None, Options::default(), None)
+//         .await?;
+//     Ok(result)
+// }
+
+// async fn get_price(web3: &Web3<Http>, pair_address: &Address) -> web3::Result<U256> {
+//     // Assuming the pair address is known. In reality, you might need another function to fetch this.
+
+//     let pair_contract = Contract::from_json(
+//         web3.eth(),
+//         pair_address,
+//         include_bytes!("path_to_your/UniswapV2Pair.abi"),
+//     )?;
+
+//     let result: (U256, U256, u32) = pair_contract
+//         .query("getReserves", (), None, Options::default(), None)
+//         .await?;
+//     let (reserve_eth, reserve_token, _timestamp) = result;
+
+//     // Calculate price as reserve ratio
+//     // This is a simplistic representation, consider slippage and other factors in real scenarios.
+//     Ok(reserve_eth / reserve_token)
+// }
+
+// async fn execute_trade(
+//     web3: &Web3<Http>,
+//     eth_address: &Address,
+//     token_address: &Address,
+//     amount_in: U256,
+// ) -> web3::Result<()> {
+//     let router_address: Address = UNISWAP_ROUTER_ADDRESS.parse()?;
+//     let router_contract = Contract::from_json(
+//         web3.eth(),
+//         router_address,
+//         include_bytes!("path_to_your/UniswapV2Router02.abi"),
+//     )?;
+
+//     let deadline = U256::from(chrono::Utc::now().timestamp() + 300); // 5 minutes from now
+
+//     let path = vec![eth_address.clone(), token_address.clone()];
+
+//     // Define the transaction parameters
+//     let tx = TransactionRequest {
+//         from: "0xYourWalletAddressHere".parse()?,
+//         to: Some(router_address),
+//         gas: Some(GAS_LIMIT.into()),
+//         gas_price: None, // Ideally you should estimate this
+//         value: Some(amount_in),
+//         data: Some(router_contract.encode(
+//             "swapExactETHForTokens",
+//             (
+//                 U256::zero(),
+//                 path,
+//                 "0xYourWalletAddressHere".parse::<Address>()?,
+//                 deadline,
+//             ),
+//         )?),
+//         nonce: None,
+//     };
+
+//     // Send the transaction
+//     let _tx_hash = web3.eth().send_transaction(tx).await?;
+
+//     Ok(())
+// }
