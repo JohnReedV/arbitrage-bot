@@ -1,16 +1,18 @@
 use eframe::egui;
+use serde::{Deserialize, Serialize};
+use std::{
+    fmt,
+    fs::{self, File},
+    io::{Error, Write},
+    path::Path,
+};
 use web3::{
     contract::{Contract, Options},
     transports::Http,
     types::{Address, BlockNumber, U256, U64},
     Web3,
+    signing::SecretKey,
 };
-
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fs::{self, File};
-use std::io::{Error, Write};
-use std::path::Path;
 
 #[tokio::main]
 async fn main() -> Result<(), eframe::Error> {
@@ -45,12 +47,25 @@ impl fmt::Display for Chain {
 #[derive(Deserialize, Serialize, Debug)]
 struct Config {
     chain: Chain,
+    private_key: String,
+    token_address_1: String,
+    token_address_2: String,
 }
 
 struct App {
     selected_chain: Chain,
-    text_input: String,
+    private_key_input: String,
+    token_address_input_1: String,
+    token_address_input_2: String,
+    temp: TempValues,
     account_text_dropped: bool,
+}
+
+struct TempValues {
+    temp_private_key_input: String,
+    temp_token_address_input_1: String,
+    temp_token_address_input_2: String,
+    temp_selected_chain: String,
 }
 
 impl App {
@@ -60,8 +75,16 @@ impl App {
                 Ok(chain) => chain,
                 Err(_) => Chain::Ethereum,
             },
-            text_input: String::new(),
+            private_key_input: String::new(),
             account_text_dropped: false,
+            token_address_input_1: String::new(),
+            token_address_input_2: String::new(),
+            temp: TempValues {
+                temp_private_key_input: String::new(),
+                temp_token_address_input_1: String::new(),
+                temp_token_address_input_2: String::new(),
+                temp_selected_chain: String::new(),
+            },
         }
     }
 }
@@ -71,8 +94,7 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.spacing_mut().item_spacing.y = 20.0;
-                let previous_chain = self.selected_chain.clone();
-
+                
                 ui.group(|ui| {
                     ui.spacing_mut().item_spacing.y = 20.0;
                     if ui.button("Start Arbitrage").clicked() {
@@ -90,32 +112,46 @@ impl eframe::App for App {
                     if self.account_text_dropped {
                         ui.horizontal(|ui| {
                             ui.label("Wallet Private Key: ");
-                            ui.text_edit_singleline(&mut self.text_input);
+                            ui.text_edit_singleline(&mut self.temp.temp_private_key_input);
 
                             egui::ComboBox::from_label("Select a chain")
-                                .selected_text(self.selected_chain.clone().to_string())
+                                .selected_text(self.temp.temp_selected_chain.clone())
                                 .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut self.selected_chain,
-                                        Chain::Ethereum,
-                                        "Ethereum",
-                                    );
-                                    ui.selectable_value(
-                                        &mut self.selected_chain,
-                                        Chain::Binance,
-                                        "Binance",
-                                    );
-                                    ui.selectable_value(
-                                        &mut self.selected_chain,
-                                        Chain::Polygon,
-                                        "Polygon",
-                                    );
+                                    ui.selectable_value(&mut self.temp.temp_selected_chain, "Ethereum".to_string(), "Ethereum");
+                                    ui.selectable_value(&mut self.temp.temp_selected_chain, "Polygon".to_string(), "Polygon");
+                                    ui.selectable_value(&mut self.temp.temp_selected_chain, "Binance".to_string(), "Binance");
                                 });
-                                let selected_chain: Chain = self.selected_chain.clone();
-                                if selected_chain != previous_chain {
-                                    handle_chain_selection(selected_chain);
-                                }
                         });
+
+                        ui.label("Addresses of the tokens to trade");
+
+                        ui.horizontal(|ui| {
+                            ui.label("Address: ");
+                            ui.text_edit_singleline(&mut self.temp.temp_token_address_input_1);
+                            ui.label("Address: ");
+                            ui.text_edit_singleline(&mut self.temp.temp_token_address_input_2);
+                        });
+
+                        if ui.button("Save").clicked() {
+                            self.private_key_input = self.temp.temp_private_key_input.clone();
+                            self.token_address_input_1 = self.temp.temp_token_address_input_1.clone();
+                            self.token_address_input_2 = self.temp.temp_token_address_input_2.clone();
+
+                            self.selected_chain = match self.temp.temp_selected_chain.as_str() {
+                                "Ethereum" => Chain::Ethereum,
+                                "Polygon" => Chain::Polygon,
+                                "Binance" => Chain::Binance,
+                                _ => Chain::Ethereum,
+                            };
+
+                            let config = Config {
+                                chain: self.selected_chain.clone(),
+                                private_key: self.private_key_input.clone(),
+                                token_address_1: self.token_address_input_1.clone(),
+                                token_address_2: self.token_address_input_2.clone(),
+                            };
+                            write_config(config);
+                        }
                     }
                 });
             });
@@ -130,23 +166,9 @@ fn get_chain_from_config() -> Result<Chain, Error> {
     Ok(config.chain)
 }
 
-fn handle_chain_selection(selected_chain: Chain) {
-    let mut config: Config;
-
-    if Path::new("config.json").exists() {
-        let data = fs::read_to_string("config.json").expect("Failed to read config");
-        config = serde_json::from_str(&data).expect("Error parsing JSON data");
-    } else {
-        config = Config {
-            chain: selected_chain,
-        };
-    }
-
-    config.chain = selected_chain;
+fn write_config(config: Config) {
     let json_data = serde_json::to_string_pretty(&config).expect("Failed to serialize to JSON");
     let mut file = File::create("config.json").expect("Failed to open file");
     file.write_all(json_data.as_bytes())
         .expect("Failed to write data");
-
-    println!("Option chosen: {:#?}", selected_chain);
 }
