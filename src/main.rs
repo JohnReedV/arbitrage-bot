@@ -261,7 +261,7 @@ impl eframe::App for App {
                                 });
                         });
 
-                        ui.label("Exchange Router Contract Address :");
+                        ui.label("Exchange Factory Contract Address :");
                         ui.text_edit_singleline(&mut self.temp.temp_contract_address);
 
                         ui.label("Addresses of tokens for both trading pairs");
