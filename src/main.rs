@@ -56,9 +56,9 @@ struct Config {
     token_address_2: String,
     token_address_3: String,
     token_address_4: String,
-    gas_limit: u64,
-    slippage_threshhold: u64,
-    minimum_profit: u64,
+    gas_limit: f64,
+    slippage_threshhold: f64,
+    minimum_profit: f64,
 }
 
 impl Config {
@@ -71,9 +71,9 @@ impl Config {
             token_address_2: String::new(),
             token_address_3: String::new(),
             token_address_4: String::new(),
-            gas_limit: 0,
-            slippage_threshhold: 0,
-            minimum_profit: 0,
+            gas_limit: 0.0,
+            slippage_threshhold: 0.0,
+            minimum_profit: 0.0,
         }
     }
 }
@@ -137,9 +137,9 @@ struct App {
     show_gas_limit_error: bool,
     show_slippage_threshhold_error: bool,
     show_minimum_profit_error: bool,
-    gas_limit: u64,
-    slippage_threshhold: u64,
-    minimum_profit: u64,
+    gas_limit: f64,
+    slippage_threshhold: f64,
+    minimum_profit: f64,
 }
 
 impl App {
@@ -158,9 +158,9 @@ impl App {
             show_gas_limit_error: false,
             show_slippage_threshhold_error: false,
             show_minimum_profit_error: false,
-            gas_limit: 0,
-            slippage_threshhold: 0,
-            minimum_profit: 0,
+            gas_limit: 0.0,
+            slippage_threshhold: 0.0,
+            minimum_profit: 0.0,
         }
     }
 
@@ -319,7 +319,7 @@ impl eframe::App for App {
                             }
                         
                             if !self.temp.temp_gas_limit.is_empty() {
-                                match self.temp.temp_gas_limit.parse::<u64>() {
+                                match self.temp.temp_gas_limit.parse::<f64>() {
                                     Ok(num) => {
                                         self.gas_limit = num;
                                     }
@@ -329,7 +329,7 @@ impl eframe::App for App {
                                 }
                             }
                             if !self.temp.temp_slippage_threshhold.is_empty() {
-                                match self.temp.temp_slippage_threshhold.parse::<u64>() {
+                                match self.temp.temp_slippage_threshhold.parse::<f64>() {
                                     Ok(num) => {
                                         self.slippage_threshhold = num;
                                     }
@@ -339,7 +339,7 @@ impl eframe::App for App {
                                 }
                             }
                             if !self.temp.temp_minimum_profit.is_empty() {
-                                match self.temp.temp_minimum_profit.parse::<u64>() {
+                                match self.temp.temp_minimum_profit.parse::<f64>() {
                                     Ok(num) => {
                                         self.minimum_profit = num;
                                     }
@@ -450,9 +450,6 @@ fn begin_arbitrage(app: &mut App) {
 
     //let _ = arbitrage(config, web3);
 }
-const GAS_LIMIT: f64 = 0.0;
-const SLIPPAGE_THRESHOLD: f64 = 0.0;
-const MINIMUM_PROFIT_THRESHOLD: f64 = 0.0;
 
 async fn arbitrage(config: Config, web3: Web3<Http>) -> web3::Result<()> {
     let price_pair_1 = get_price_from_dex(&web3, &config, 1).await?;
@@ -460,17 +457,17 @@ async fn arbitrage(config: Config, web3: Web3<Http>) -> web3::Result<()> {
 
     let spread = price_pair_1 - price_pair_2;
 
-    if spread.abs() < SLIPPAGE_THRESHOLD {
+    if spread.abs() < config.slippage_threshhold {
         println!("Exiting: Slippage below threshold");
         return Ok(());
     }
 
     let gas_price = web3.eth().gas_price().await?;
-    let total_gas_cost: f64 = gas_price.as_u64() as f64 * GAS_LIMIT;
+    let total_gas_cost: f64 = gas_price.as_u64() as f64 * config.gas_limit;
 
     let potential_profit = spread - total_gas_cost;
 
-    if potential_profit < MINIMUM_PROFIT_THRESHOLD {
+    if potential_profit < config.minimum_profit {
         println!("Exiting: Profit below threshold");
         return Ok(());
     }
