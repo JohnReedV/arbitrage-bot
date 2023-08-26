@@ -466,5 +466,4 @@ fn check_valid_addresses(address_strs: Vec<String>) -> HashMap<String, bool> {
     }
 
     return results;
-    //test
 }
