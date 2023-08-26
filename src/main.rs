@@ -476,17 +476,17 @@ async fn arbitrage(config: Config, web3: Web3<Http>) -> web3::Result<()> {
 
     let spread = price_pair_1 - price_pair_2;
 
-    // if spread.abs() < config.slippage_threshhold {
-    //     println!("Exiting: Slippage below threshold");
-    //     return Ok(());
-    // }
-
+    if spread.abs() < config.slippage_threshhold {
+        println!("Exiting: Slippage below threshold");
+        return Ok(());
+    }
+    //MAKE IT PROFIT
     let gas_price = web3.eth().gas_price().await?;
     let total_gas_cost: f64 = gas_price.as_u64() as f64 * config.gas_limit;
 
     let potential_profit = spread - total_gas_cost;
     println!(
-        "Price1: {:.18} Price2: {:.100} Gas: {} Profit: {}",
+        "Price1: {:.18} Price2: {:.18} Gas: {} Profit: {}",
         price_pair_1, price_pair_2, total_gas_cost, potential_profit
     );
     if potential_profit < config.minimum_profit {
@@ -563,13 +563,19 @@ async fn get_price_from_dex(web3: &Web3<Http>, config: &Config, pair_id: u8) -> 
     let decimals_token1 = fetch_decimals_of_token(web3, token_a_h160)
         .await
         .map_err(|e| {
-            web3::Error::InvalidResponse(format!("Get Decimals failed for token 1: {:?}", e))
+            web3::Error::InvalidResponse(format!(
+                "Failed to get decimals for token 1 in pair {}: {:?}",
+                pair_id, e
+            ))
         })?;
 
     let decimals_token2 = fetch_decimals_of_token(web3, token_b_h160)
         .await
         .map_err(|e| {
-            web3::Error::InvalidResponse(format!("Get Decimals failed for token 2: {:?}", e))
+            web3::Error::InvalidResponse(format!(
+                "Failed to get decimals for token 2 in pair {}: {:?}",
+                pair_id, e
+            ))
         })?;
 
     let sqrt_price_x96 = slot0.0;

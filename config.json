@@ -6,7 +6,7 @@
   "token_address_2": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
   "token_address_3": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
   "token_address_4": "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",
-  "gas_limit": 10000.0,
+  "gas_limit": 100000.0,
   "slippage_threshhold": 0.5,
   "minimum_profit": 10.0
 }
