@@ -94,7 +94,9 @@ struct TempValues {
 impl TempValues {
     fn default() -> Self {
         TempValues {
-            temp_private_key_input: String::from("0000000000000000000000000000000000000000000000000000000000000000"),
+            temp_private_key_input: String::from(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
             temp_token_address_input_1: String::from("0x..."),
             temp_token_address_input_2: String::from("0x..."),
             temp_token_address_input_3: String::from("0x..."),
@@ -281,13 +283,21 @@ impl eframe::App for App {
 
                         ui.horizontal(|ui| {
                             ui.label("Gas Limit: ");
-                            ui.add(egui::TextEdit::singleline(&mut self.temp.temp_gas_limit).desired_width(125.0));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.temp.temp_gas_limit)
+                                    .desired_width(125.0),
+                            );
                             ui.label("Slippage Threshhold: ");
-                            ui.add(egui::TextEdit::singleline(&mut self.temp.temp_slippage_threshhold).desired_width(125.0));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.temp.temp_slippage_threshhold)
+                                    .desired_width(125.0),
+                            );
                             ui.label("Minimum Profit: ");
-                            ui.add(egui::TextEdit::singleline(&mut self.temp.temp_minimum_profit).desired_width(125.0));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.temp.temp_minimum_profit)
+                                    .desired_width(125.0),
+                            );
                         });
-                        
 
                         ui.horizontal(|ui| {
                             ui.label("Wallet Private Key: ");
@@ -317,7 +327,7 @@ impl eframe::App for App {
                             if !self.temp.temp_contract_address.is_empty() {
                                 self.contract_address = self.temp.temp_contract_address.clone();
                             }
-                        
+
                             if !self.temp.temp_gas_limit.is_empty() {
                                 match self.temp.temp_gas_limit.parse::<f64>() {
                                     Ok(num) => {
@@ -424,13 +434,17 @@ fn begin_arbitrage(app: &mut App) {
 
     let transport: Http = match config.chain {
         Chain::Ethereum => {
-            web3::transports::http::Http::new("https://rpc.api.moonbeam.network").unwrap()
+            web3::transports::http::Http::new(
+                "https://mainnet.infura.io/v3/f679762894d44f4e88b1a37fbf30282b",
+            )
+            .unwrap() // https://ethereum.blockpi.network/v1/rpc/public
         }
         Chain::Polygon => {
-            web3::transports::http::Http::new("https://rpc.api.moonbeam.network").unwrap()
+            web3::transports::http::Http::new("https://polygon.blockpi.network/v1/rpc/public")
+                .unwrap()
         }
         Chain::Binance => {
-            web3::transports::http::Http::new("https://rpc.api.moonbeam.network").unwrap()
+            web3::transports::http::Http::new("https://bsc-dataseed.bnbchain.org").unwrap()
         }
     };
     let web3: Web3<Http> = web3::Web3::new(transport);
@@ -448,7 +462,12 @@ fn begin_arbitrage(app: &mut App) {
         return;
     }
 
-    //let _ = arbitrage(config, web3);
+    tokio::spawn(async move {
+        match arbitrage(config, web3).await {
+            Ok(_) => println!("Arbitrage completed successfully"),
+            Err(err) => eprintln!("Arbitrage failed: {}", err),
+        }
+    });
 }
 
 async fn arbitrage(config: Config, web3: Web3<Http>) -> web3::Result<()> {
@@ -457,21 +476,23 @@ async fn arbitrage(config: Config, web3: Web3<Http>) -> web3::Result<()> {
 
     let spread = price_pair_1 - price_pair_2;
 
-    if spread.abs() < config.slippage_threshhold {
-        println!("Exiting: Slippage below threshold");
-        return Ok(());
-    }
+    // if spread.abs() < config.slippage_threshhold {
+    //     println!("Exiting: Slippage below threshold");
+    //     return Ok(());
+    // }
 
     let gas_price = web3.eth().gas_price().await?;
     let total_gas_cost: f64 = gas_price.as_u64() as f64 * config.gas_limit;
 
     let potential_profit = spread - total_gas_cost;
-
+    println!(
+        "Price1: {:.18} Price2: {:.100} Gas: {} Profit: {}",
+        price_pair_1, price_pair_2, total_gas_cost, potential_profit
+    );
     if potential_profit < config.minimum_profit {
         println!("Exiting: Profit below threshold");
         return Ok(());
     }
-
     // let tx_hash_1;
     // let tx_hash_2;
 
@@ -499,13 +520,13 @@ async fn get_price_from_dex(web3: &Web3<Http>, config: &Config, pair_id: u8) -> 
         _ => return Err(web3::Error::InvalidResponse("Invalid pair_id".into())),
     };
 
-    let file = File::open("../abi.json").unwrap();
-    let abi = web3::ethabi::Contract::load(file).unwrap();
+    let factory_file = File::open("./factory_abi.json").unwrap();
+    let factory_abi = web3::ethabi::Contract::load(factory_file).unwrap();
 
-    let contract = Contract::new(
+    let factory_contract = Contract::new(
         web3.eth(),
         H160::from_str(config.contract_address.as_str()).unwrap(),
-        abi,
+        factory_abi,
     );
 
     let token_a_h160 = H160::from_str(token_a.as_str())
@@ -514,24 +535,50 @@ async fn get_price_from_dex(web3: &Web3<Http>, config: &Config, pair_id: u8) -> 
     let token_b_h160 = H160::from_str(token_b.as_str())
         .map_err(|e| web3::Error::InvalidResponse(format!("Failed to convert token_b: {:?}", e)))?;
 
-    let pool_address: U256 = contract
+    let pool_address: Address = factory_contract
         .query(
             "getPool",
-            (
-                token_a_h160,
-                token_b_h160,
-                U256::from(300000000000000000u64),
-            ),
+            (token_a_h160, token_b_h160, U256::from(3000)),
             None,
             Options::default(),
             None,
         )
         .await
-        .map_err(|e| web3::Error::InvalidResponse(format!("Contract query failed: {:?}", e)))?;
+        .map_err(|e| {
+            web3::Error::InvalidResponse(format!("Factory contract query failed: {:?}", e))
+        })?;
 
-    let price_f64 = pool_address.as_u64() as f64 / 1e18;
+    let pool_file = File::open("./pool_abi.json").unwrap();
+    let pool_abi = web3::ethabi::Contract::load(pool_file).unwrap();
 
-    Ok(price_f64)
+    let pool_contract = Contract::new(web3.eth(), pool_address, pool_abi);
+
+    let slot0: (U256, i64, U256, u32, u32, u32, bool) = pool_contract
+        .query("slot0", (), None, Options::default(), None)
+        .await
+        .map_err(|e| {
+            web3::Error::InvalidResponse(format!("Pool contract query failed: {:?}", e))
+        })?;
+
+    let decimals_token1 = fetch_decimals_of_token(web3, token_a_h160)
+        .await
+        .map_err(|e| {
+            web3::Error::InvalidResponse(format!("Get Decimals failed for token 1: {:?}", e))
+        })?;
+
+    let decimals_token2 = fetch_decimals_of_token(web3, token_b_h160)
+        .await
+        .map_err(|e| {
+            web3::Error::InvalidResponse(format!("Get Decimals failed for token 2: {:?}", e))
+        })?;
+
+    let sqrt_price_x96 = slot0.0;
+    let sqrt_price_x96_f64 = u256_to_f64(sqrt_price_x96);
+    let sqrt_price = sqrt_price_x96_f64 / (2_f64.powi(96));
+    let price = sqrt_price * sqrt_price;
+    let adj_price = price / 10_f64.powi(decimals_token1 as i32 - decimals_token2 as i32);
+
+    Ok(adj_price)
 }
 
 // async fn execute_transaction() -> Result<(), Box<dyn std::error::Error>> {
@@ -575,10 +622,28 @@ async fn get_price_from_dex(web3: &Web3<Http>, config: &Config, pair_id: u8) -> 
 fn check_valid_addresses(address_strs: Vec<&String>) -> HashMap<&String, bool> {
     let mut results = HashMap::new();
 
-    for addr in address_strs.iter() {
+    for addr in address_strs {
         let is_valid = addr.parse::<Address>().is_ok();
-        results.insert(addr.clone(), is_valid);
+        results.insert(addr, is_valid);
     }
 
     return results;
+}
+fn u256_to_f64(u: U256) -> f64 {
+    let (upper, lower) = u.div_mod(U256::from(u64::MAX));
+    (upper.as_u64() as f64) * ((u64::MAX as f64) + 1.0) + (lower.as_u64() as f64)
+}
+
+async fn fetch_decimals_of_token(web3: &Web3<Http>, token_address: H160) -> web3::Result<u8> {
+    let token_abi_file = File::open("./erc20_abi.json").unwrap();
+    let token_abi = web3::ethabi::Contract::load(token_abi_file).unwrap();
+    let token_contract = Contract::new(web3.eth(), token_address, token_abi);
+    let decimals: u8 = token_contract
+        .query("decimals", (), None, Options::default(), None)
+        .await
+        .map_err(|e| {
+            web3::Error::InvalidResponse(format!("Token contract query failed: {:?}", e))
+        })?;
+
+    Ok(decimals)
 }
