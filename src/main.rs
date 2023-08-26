@@ -1,4 +1,5 @@
 use eframe::egui;
+use hex_literal::hex;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -11,7 +12,7 @@ use web3::{
     contract::{Contract, Options},
     signing::SecretKey,
     transports::Http,
-    types::{Address, BlockNumber, H160, U256},
+    types::{Address, TransactionRequest, H160, U256},
     Web3,
 };
 
@@ -55,6 +56,9 @@ struct Config {
     token_address_2: String,
     token_address_3: String,
     token_address_4: String,
+    gas_limit: u64,
+    slippage_threshhold: u64,
+    minimum_profit: u64,
 }
 
 impl Config {
@@ -67,6 +71,54 @@ impl Config {
             token_address_2: String::new(),
             token_address_3: String::new(),
             token_address_4: String::new(),
+            gas_limit: 0,
+            slippage_threshhold: 0,
+            minimum_profit: 0,
+        }
+    }
+}
+
+struct TempValues {
+    temp_private_key_input: String,
+    temp_token_address_input_1: String,
+    temp_token_address_input_2: String,
+    temp_token_address_input_3: String,
+    temp_token_address_input_4: String,
+    temp_selected_chain: Chain,
+    temp_contract_address: String,
+    temp_gas_limit: String,
+    temp_slippage_threshhold: String,
+    temp_minimum_profit: String,
+}
+
+impl TempValues {
+    fn default() -> Self {
+        TempValues {
+            temp_private_key_input: String::from("0000000000000000000000000000000000000000000000000000000000000000"),
+            temp_token_address_input_1: String::from("0x..."),
+            temp_token_address_input_2: String::from("0x..."),
+            temp_token_address_input_3: String::from("0x..."),
+            temp_token_address_input_4: String::from("0x..."),
+            temp_selected_chain: Chain::default(),
+            temp_contract_address: String::from("0x..."),
+            temp_gas_limit: String::from("0"),
+            temp_slippage_threshhold: String::from("0"),
+            temp_minimum_profit: String::from("0"),
+        }
+    }
+
+    fn new(config: Config) -> Self {
+        TempValues {
+            temp_private_key_input: config.private_key,
+            temp_token_address_input_1: config.token_address_1,
+            temp_token_address_input_2: config.token_address_2,
+            temp_token_address_input_3: config.token_address_3,
+            temp_token_address_input_4: config.token_address_4,
+            temp_selected_chain: config.chain,
+            temp_contract_address: config.contract_address,
+            temp_gas_limit: config.gas_limit.to_string(),
+            temp_slippage_threshhold: config.slippage_threshhold.to_string(),
+            temp_minimum_profit: config.minimum_profit.to_string(),
         }
     }
 }
@@ -82,44 +134,12 @@ struct App {
     temp: TempValues,
     account_text_dropped: bool,
     invalid_address_popup: bool,
-}
-
-struct TempValues {
-    temp_private_key_input: String,
-    temp_token_address_input_1: String,
-    temp_token_address_input_2: String,
-    temp_token_address_input_3: String,
-    temp_token_address_input_4: String,
-    temp_selected_chain: Chain,
-    temp_contract_address: String,
-}
-
-impl TempValues {
-    fn default() -> Self {
-        TempValues {
-            temp_private_key_input: String::new(),
-            temp_token_address_input_1: String::new(),
-            temp_token_address_input_2: String::new(),
-            temp_token_address_input_3: String::new(),
-            temp_token_address_input_4: String::new(),
-            temp_selected_chain: Chain::default(),
-            temp_contract_address: String::new(),
-        }
-    }
-}
-
-impl TempValues {
-    fn new(config: Config) -> Self {
-        TempValues {
-            temp_private_key_input: config.private_key,
-            temp_contract_address: config.contract_address,
-            temp_selected_chain: config.chain,
-            temp_token_address_input_1: config.token_address_1,
-            temp_token_address_input_2: config.token_address_2,
-            temp_token_address_input_3: config.token_address_3,
-            temp_token_address_input_4: config.token_address_4,
-        }
-    }
+    show_gas_limit_error: bool,
+    show_slippage_threshhold_error: bool,
+    show_minimum_profit_error: bool,
+    gas_limit: u64,
+    slippage_threshhold: u64,
+    minimum_profit: u64,
 }
 
 impl App {
@@ -127,19 +147,23 @@ impl App {
         App {
             selected_chain: Chain::Ethereum,
             private_key_input: String::new(),
-            account_text_dropped: false,
             token_address_input_1: String::new(),
             token_address_input_2: String::new(),
             token_address_input_3: String::new(),
             token_address_input_4: String::new(),
             contract_address: String::new(),
-            invalid_address_popup: false,
             temp: TempValues::default(),
+            account_text_dropped: false,
+            invalid_address_popup: false,
+            show_gas_limit_error: false,
+            show_slippage_threshhold_error: false,
+            show_minimum_profit_error: false,
+            gas_limit: 0,
+            slippage_threshhold: 0,
+            minimum_profit: 0,
         }
     }
-}
 
-impl App {
     fn new() -> Self {
         let current_config = get_config();
 
@@ -149,22 +173,26 @@ impl App {
                 App {
                     selected_chain: config.chain,
                     private_key_input: config.private_key,
-                    account_text_dropped: false,
                     token_address_input_1: config.token_address_1,
                     token_address_input_2: config.token_address_2,
                     token_address_input_3: config.token_address_3,
                     token_address_input_4: config.token_address_4,
                     contract_address: config.contract_address,
-                    invalid_address_popup: false,
                     temp: TempValues::new(config2),
+                    account_text_dropped: false,
+                    invalid_address_popup: false,
+                    show_gas_limit_error: false,
+                    show_slippage_threshhold_error: false,
+                    show_minimum_profit_error: false,
+                    gas_limit: config.gas_limit,
+                    slippage_threshhold: config.slippage_threshhold,
+                    minimum_profit: config.minimum_profit,
                 }
             }
             Err(_) => return App::default(),
         }
     }
-}
 
-impl App {
     fn get_config() -> Config {
         let current_config = get_config();
 
@@ -177,6 +205,9 @@ impl App {
                 token_address_2: config.token_address_2,
                 token_address_3: config.token_address_3,
                 token_address_4: config.token_address_4,
+                gas_limit: config.gas_limit,
+                slippage_threshhold: config.slippage_threshhold,
+                minimum_profit: config.minimum_profit,
             },
             Err(_) => return Config::default(),
         }
@@ -249,6 +280,16 @@ impl eframe::App for App {
                         });
 
                         ui.horizontal(|ui| {
+                            ui.label("Gas Limit: ");
+                            ui.add(egui::TextEdit::singleline(&mut self.temp.temp_gas_limit).desired_width(125.0));
+                            ui.label("Slippage Threshhold: ");
+                            ui.add(egui::TextEdit::singleline(&mut self.temp.temp_slippage_threshhold).desired_width(125.0));
+                            ui.label("Minimum Profit: ");
+                            ui.add(egui::TextEdit::singleline(&mut self.temp.temp_minimum_profit).desired_width(125.0));
+                        });
+                        
+
+                        ui.horizontal(|ui| {
                             ui.label("Wallet Private Key: ");
                             ui.text_edit_singleline(&mut self.temp.temp_private_key_input);
                         });
@@ -276,6 +317,38 @@ impl eframe::App for App {
                             if !self.temp.temp_contract_address.is_empty() {
                                 self.contract_address = self.temp.temp_contract_address.clone();
                             }
+                        
+                            if !self.temp.temp_gas_limit.is_empty() {
+                                match self.temp.temp_gas_limit.parse::<u64>() {
+                                    Ok(num) => {
+                                        self.gas_limit = num;
+                                    }
+                                    Err(_) => {
+                                        self.show_gas_limit_error = true;
+                                    }
+                                }
+                            }
+                            if !self.temp.temp_slippage_threshhold.is_empty() {
+                                match self.temp.temp_slippage_threshhold.parse::<u64>() {
+                                    Ok(num) => {
+                                        self.slippage_threshhold = num;
+                                    }
+                                    Err(_) => {
+                                        self.show_slippage_threshhold_error = true;
+                                    }
+                                }
+                            }
+                            if !self.temp.temp_minimum_profit.is_empty() {
+                                match self.temp.temp_minimum_profit.parse::<u64>() {
+                                    Ok(num) => {
+                                        self.minimum_profit = num;
+                                    }
+                                    Err(_) => {
+                                        self.show_minimum_profit_error = true;
+                                    }
+                                }
+                            }
+
                             self.selected_chain = self.temp.temp_selected_chain;
 
                             let config = Config {
@@ -286,6 +359,9 @@ impl eframe::App for App {
                                 token_address_2: self.token_address_input_2.clone(),
                                 token_address_3: self.token_address_input_3.clone(),
                                 token_address_4: self.token_address_input_4.clone(),
+                                gas_limit: self.gas_limit.clone(),
+                                slippage_threshhold: self.slippage_threshhold.clone(),
+                                minimum_profit: self.minimum_profit.clone(),
                             };
                             write_config(config);
                         }
@@ -296,6 +372,31 @@ impl eframe::App for App {
                         ui.label("One or more addresses are invalid.");
                         if ui.button("Close").clicked() {
                             self.invalid_address_popup = false;
+                        }
+                    });
+                }
+
+                if self.show_gas_limit_error {
+                    egui::Window::new("Invalid Gas Number").show(ctx, |ui| {
+                        ui.label("Gas Limit must be a number");
+                        if ui.button("Close").clicked() {
+                            self.show_gas_limit_error = false;
+                        }
+                    });
+                }
+                if self.show_slippage_threshhold_error {
+                    egui::Window::new("Invalid Slippage Number").show(ctx, |ui| {
+                        ui.label("Slippage Threshhold must be a number");
+                        if ui.button("Close").clicked() {
+                            self.show_slippage_threshhold_error = false;
+                        }
+                    });
+                }
+                if self.show_minimum_profit_error {
+                    egui::Window::new("Invalid Minimum Profit Number").show(ctx, |ui| {
+                        ui.label("Minimum Profit must be a number");
+                        if ui.button("Close").clicked() {
+                            self.show_minimum_profit_error = false;
                         }
                     });
                 }
@@ -334,130 +435,147 @@ fn begin_arbitrage(app: &mut App) {
     };
     let web3: Web3<Http> = web3::Web3::new(transport);
 
-    let valid_bools: HashMap<String, bool> = check_valid_addresses(vec![
-        config.contract_address,
-        config.token_address_1,
-        config.token_address_2,
-        config.token_address_3,
-        config.token_address_4,
+    let valid_bools: HashMap<&String, bool> = check_valid_addresses(vec![
+        &config.contract_address,
+        &config.token_address_1,
+        &config.token_address_2,
+        &config.token_address_3,
+        &config.token_address_4,
     ]);
 
     if valid_bools.values().any(|&val| !val) {
         app.invalid_address_popup = true;
         return;
     }
+
+    //let _ = arbitrage(config, web3);
+}
+const GAS_LIMIT: f64 = 0.0;
+const SLIPPAGE_THRESHOLD: f64 = 0.0;
+const MINIMUM_PROFIT_THRESHOLD: f64 = 0.0;
+
+async fn arbitrage(config: Config, web3: Web3<Http>) -> web3::Result<()> {
+    let price_pair_1 = get_price_from_dex(&web3, &config, 1).await?;
+    let price_pair_2 = get_price_from_dex(&web3, &config, 2).await?;
+
+    let spread = price_pair_1 - price_pair_2;
+
+    if spread.abs() < SLIPPAGE_THRESHOLD {
+        println!("Exiting: Slippage below threshold");
+        return Ok(());
+    }
+
+    let gas_price = web3.eth().gas_price().await?;
+    let total_gas_cost: f64 = gas_price.as_u64() as f64 * GAS_LIMIT;
+
+    let potential_profit = spread - total_gas_cost;
+
+    if potential_profit < MINIMUM_PROFIT_THRESHOLD {
+        println!("Exiting: Profit below threshold");
+        return Ok(());
+    }
+
+    // let tx_hash_1;
+    // let tx_hash_2;
+
+    // if price_pair_1 > price_pair_2 {
+    //     tx_hash_1 = execute_trade(&web3, &config, 1, 100.0, gas_price).await?;
+    //     tx_hash_2 = execute_trade(&web3, &config, 2, 100.0, gas_price).await?;
+    // } else if price_pair_2 > price_pair_1 {
+    //     tx_hash_1 = execute_trade(&web3, &config, 1, -100.0, gas_price).await?;
+    //     tx_hash_2 = execute_trade(&web3, &config, 2, -100.0, gas_price).await?;
+    // } else {
+    //     println!("Exiting: No arbitrage opportunity");
+    //     return Ok(());
+    // }
+
+    // println!("Transaction 1 Hash: {}", tx_hash_1);
+    // println!("Transaction 2 Hash: {}", tx_hash_2);
+
+    Ok(())
 }
 
-// async fn arbitrage(
-//     config: Config,
-//     web3: Web3<Http>,
-// ) -> web3::Result<()> {
-//     loop {
-//         let pair_addresses = get_pair_addresses(&web3, config).await?;
-        
-//         let (price_1, price_2) = tokio::try_join!(
-//             get_price(&web3, pair_addresses),
-//             get_price(&web3, &pair_address, config.token_2, config.token_1),
-//         )?;
-        
-//         let fee_adjusted_price_1 = price_1 * (1.0 - config.transaction_fee);
-//         let fee_adjusted_price_2 = price_2 * (1.0 - config.transaction_fee);
-        
-//         if fee_adjusted_price_1 > fee_adjusted_price_2 {
-//             let tx1 = execute_trade(&web3, &pair_address, config.token_1, config.token_2, price_1).await?;
-//             wait_for_transaction(&web3, tx1).await?;
-//         } else if fee_adjusted_price_2 > fee_adjusted_price_1 {
-//             let tx2 = execute_trade(&web3, &pair_address, config.token_2, config.token_1, price_2).await?;
-//             wait_for_transaction(&web3, tx2).await?;
-//         }
+async fn get_price_from_dex(web3: &Web3<Http>, config: &Config, pair_id: u8) -> web3::Result<f64> {
+    let (token_a, token_b) = match pair_id {
+        1 => (&config.token_address_1, &config.token_address_2),
+        2 => (&config.token_address_3, &config.token_address_4),
+        _ => return Err(web3::Error::InvalidResponse("Invalid pair_id".into())),
+    };
 
-//         tokio::time::sleep(tokio::time::Duration::from_secs(config.refresh_interval)).await;
-//     }
-// }
+    let file = File::open("../abi.json").unwrap();
+    let abi = web3::ethabi::Contract::load(file).unwrap();
 
+    let contract = Contract::new(
+        web3.eth(),
+        H160::from_str(config.contract_address.as_str()).unwrap(),
+        abi,
+    );
 
-// async fn get_pair_addresses(web3: &Web3<Http>, config: Config) -> web3::Result<Address> {
-//     let factory_address: H160 = match H160::from_str(config.contract_address.as_str()) {
-//         Ok(val) => val,
-//         Err(_) => {}
-//     };
-//     let factory_contract = Contract::from_json(
-//         web3.eth(),
-//         factory_address,
-//         include_bytes!("path_to_your/UniswapV2Factory.abi"),
-//     );
+    let token_a_h160 = H160::from_str(token_a.as_str())
+        .map_err(|e| web3::Error::InvalidResponse(format!("Failed to convert token_a: {:?}", e)))?;
 
-//     let result: Address = factory_contract
-//         .query(
-//             "getPair",
-//             (config.token_address_1, config.token_address_2),
-//             None,
-//             Options::default(),
-//             None,
-//         )
-//         .await?;
-//     Ok(result)
-// }
+    let token_b_h160 = H160::from_str(token_b.as_str())
+        .map_err(|e| web3::Error::InvalidResponse(format!("Failed to convert token_b: {:?}", e)))?;
 
-// async fn get_price(web3: &Web3<Http>, pair_address: &Address) -> web3::Result<U256> {
+    let pool_address: U256 = contract
+        .query(
+            "getPool",
+            (
+                token_a_h160,
+                token_b_h160,
+                U256::from(300000000000000000u64),
+            ),
+            None,
+            Options::default(),
+            None,
+        )
+        .await
+        .map_err(|e| web3::Error::InvalidResponse(format!("Contract query failed: {:?}", e)))?;
 
-//     let pair_contract = Contract::from_json(
-//         web3.eth(),
-//         pair_address,
-//         include_bytes!("path_to_your/UniswapV2Pair.abi"),
-//     )?;
+    let price_f64 = pool_address.as_u64() as f64 / 1e18;
 
-//     let result: (U256, U256, u32) = pair_contract
-//         .query("getReserves", (), None, Options::default(), None)
-//         .await?;
-//     let (reserve_eth, reserve_token, _timestamp) = result;
+    Ok(price_f64)
+}
 
-//     Ok(reserve_eth / reserve_token)
-// }
+// async fn execute_transaction() -> Result<(), Box<dyn std::error::Error>> {
+//     let http = Http::new("http://localhost:8545")?;
+//     let web3 = Web3::new(http);
 
-// async fn execute_trade(
-//     web3: &Web3<Http>,
-//     eth_address: &Address,
-//     token_address: &Address,
-//     amount_in: U256,
-// ) -> web3::Result<()> {
-//     let router_address: Address = UNISWAP_ROUTER_ADDRESS.parse()?;
-//     let router_contract = Contract::from_json(
-//         web3.eth(),
-//         router_address,
-//         include_bytes!("path_to_your/UniswapV2Router02.abi"),
-//     )?;
+//     let contract_address: Address = "0x...".parse()?;
+//     let contract_abi = include_str!("../abi.json");
 
-//     let deadline = U256::from(chrono::Utc::now().timestamp() + 300); // 5 minutes from now
+//     let contract = Contract::from_json(web3.eth(), contract_address, contract_abi.as_bytes())
+//         .map_err(|e| format!("ABI Error: {}", e))?;
 
-//     let path = vec![eth_address.clone(), token_address.clone()];
+//     let some_arg1 = encode(&[U256::from(1).into()]);
+//     let some_arg2 = encode(&[U256::from(2).into()]);
+//     let args = vec![some_arg1, some_arg2];
 
-//     // Define the transaction parameters
-//     let tx = TransactionRequest {
-//         from: "0xYourWalletAddressHere".parse()?,
-//         to: Some(router_address),
-//         gas: Some(GAS_LIMIT.into()),
-//         gas_price: None, // Ideally you should estimate this
-//         value: Some(amount_in),
-//         data: Some(router_contract.encode(
-//             "swapExactETHForTokens",
-//             (
-//                 U256::zero(),
-//                 path,
-//                 "0xYourWalletAddressHere".parse::<Address>()?,
-//                 deadline,
-//             ),
-//         )?),
-//         nonce: None,
+//     let method_data = contract.abi.encode_function_call("yourMethodNameHere", &args)
+//         .map_err(|e| format!("Encoding Error: {}", e))?;
+
+//     let secret_key_bytes = hex::decode("your_private_key_here")?;
+//     let secret_key = SecretKey::from_slice(&secret_key_bytes)?;
+
+//     let tx = TransactionParameters {
+//         to: Some(contract_address),
+//         gas: U256::from(21000),
+//         gas_price: Some(web3.eth().gas_price().await?),
+//         data: Some(method_data.into()),
+//         ..Default::default()
 //     };
 
-//     // Send the transaction
-//     let _tx_hash = web3.eth().send_transaction(tx).await?;
+//     // The following assumes you are using an offline account
+//     let account = web3::accounts::Account::Offline(secret_key, None);
+//     let signed_tx = account.sign_transaction(tx).await?;
+//     let tx_hash = web3.eth().send_raw_transaction(signed_tx.raw_transaction).await?;
+
+//     println!("Transaction sent with hash: {:?}", tx_hash);
 
 //     Ok(())
 // }
 
-fn check_valid_addresses(address_strs: Vec<String>) -> HashMap<String, bool> {
+fn check_valid_addresses(address_strs: Vec<&String>) -> HashMap<&String, bool> {
     let mut results = HashMap::new();
 
     for addr in address_strs.iter() {
