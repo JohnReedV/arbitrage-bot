@@ -1,16 +1,17 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fmt,
     fs::{self, File},
     io::{Error, Write},
-    path::Path,
+    str::FromStr,
 };
 use web3::{
     contract::{Contract, Options},
     signing::SecretKey,
     transports::Http,
-    types::{Address, BlockNumber, U256, U64},
+    types::{Address, BlockNumber, H160, U256},
     Web3,
 };
 
@@ -52,6 +53,22 @@ struct Config {
     private_key: String,
     token_address_1: String,
     token_address_2: String,
+    token_address_3: String,
+    token_address_4: String,
+}
+
+impl Config {
+    fn default() -> Self {
+        Config {
+            chain: Chain::Ethereum,
+            contract_address: String::new(),
+            private_key: String::new(),
+            token_address_1: String::new(),
+            token_address_2: String::new(),
+            token_address_3: String::new(),
+            token_address_4: String::new(),
+        }
+    }
 }
 
 struct App {
@@ -59,15 +76,20 @@ struct App {
     private_key_input: String,
     token_address_input_1: String,
     token_address_input_2: String,
+    token_address_input_3: String,
+    token_address_input_4: String,
     contract_address: String,
     temp: TempValues,
     account_text_dropped: bool,
+    invalid_address_popup: bool,
 }
 
 struct TempValues {
     temp_private_key_input: String,
     temp_token_address_input_1: String,
     temp_token_address_input_2: String,
+    temp_token_address_input_3: String,
+    temp_token_address_input_4: String,
     temp_selected_chain: Chain,
     temp_contract_address: String,
 }
@@ -78,6 +100,8 @@ impl TempValues {
             temp_private_key_input: String::new(),
             temp_token_address_input_1: String::new(),
             temp_token_address_input_2: String::new(),
+            temp_token_address_input_3: String::new(),
+            temp_token_address_input_4: String::new(),
             temp_selected_chain: Chain::default(),
             temp_contract_address: String::new(),
         }
@@ -92,6 +116,8 @@ impl TempValues {
             temp_selected_chain: config.chain,
             temp_token_address_input_1: config.token_address_1,
             temp_token_address_input_2: config.token_address_2,
+            temp_token_address_input_3: config.token_address_3,
+            temp_token_address_input_4: config.token_address_4,
         }
     }
 }
@@ -104,7 +130,10 @@ impl App {
             account_text_dropped: false,
             token_address_input_1: String::new(),
             token_address_input_2: String::new(),
+            token_address_input_3: String::new(),
+            token_address_input_4: String::new(),
             contract_address: String::new(),
+            invalid_address_popup: false,
             temp: TempValues::default(),
         }
     }
@@ -123,11 +152,33 @@ impl App {
                     account_text_dropped: false,
                     token_address_input_1: config.token_address_1,
                     token_address_input_2: config.token_address_2,
+                    token_address_input_3: config.token_address_3,
+                    token_address_input_4: config.token_address_4,
                     contract_address: config.contract_address,
+                    invalid_address_popup: false,
                     temp: TempValues::new(config2),
                 }
             }
             Err(_) => return App::default(),
+        }
+    }
+}
+
+impl App {
+    fn get_config() -> Config {
+        let current_config = get_config();
+
+        match current_config {
+            Ok(config) => Config {
+                chain: config.chain,
+                contract_address: config.contract_address,
+                private_key: config.private_key,
+                token_address_1: config.token_address_1,
+                token_address_2: config.token_address_2,
+                token_address_3: config.token_address_3,
+                token_address_4: config.token_address_4,
+            },
+            Err(_) => return Config::default(),
         }
     }
 }
@@ -141,7 +192,7 @@ impl eframe::App for App {
                 ui.group(|ui| {
                     ui.spacing_mut().item_spacing.y = 20.0;
                     if ui.button("Start Arbitrage").clicked() {
-                        println!("Button 1 was pressed!");
+                        begin_arbitrage(self);
                     }
                     if ui.button("Stop Arbitrage").clicked() {
                         println!("Button 2 was pressed!");
@@ -182,12 +233,19 @@ impl eframe::App for App {
                         ui.label("Exchange Router Contract Address :");
                         ui.text_edit_singleline(&mut self.temp.temp_contract_address);
 
-                        ui.label("Addresses of the tokens to trade");
+                        ui.label("Addresses of tokens for both trading pairs");
                         ui.horizontal(|ui| {
-                            ui.label("Token Address: ");
+                            ui.label("Token Address 1: ");
                             ui.text_edit_singleline(&mut self.temp.temp_token_address_input_1);
-                            ui.label("Token Address: ");
+                            ui.label("Token Address 2: ");
                             ui.text_edit_singleline(&mut self.temp.temp_token_address_input_2);
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Token Address 1: ");
+                            ui.text_edit_singleline(&mut self.temp.temp_token_address_input_3);
+                            ui.label("Token Address 2: ");
+                            ui.text_edit_singleline(&mut self.temp.temp_token_address_input_4);
                         });
 
                         ui.horizontal(|ui| {
@@ -207,6 +265,14 @@ impl eframe::App for App {
                                 self.token_address_input_2 =
                                     self.temp.temp_token_address_input_2.clone();
                             }
+                            if !self.temp.temp_token_address_input_3.is_empty() {
+                                self.token_address_input_3 =
+                                    self.temp.temp_token_address_input_3.clone();
+                            }
+                            if !self.temp.temp_token_address_input_4.is_empty() {
+                                self.token_address_input_4 =
+                                    self.temp.temp_token_address_input_4.clone();
+                            }
                             if !self.temp.temp_contract_address.is_empty() {
                                 self.contract_address = self.temp.temp_contract_address.clone();
                             }
@@ -218,11 +284,21 @@ impl eframe::App for App {
                                 private_key: self.private_key_input.clone(),
                                 token_address_1: self.token_address_input_1.clone(),
                                 token_address_2: self.token_address_input_2.clone(),
+                                token_address_3: self.token_address_input_3.clone(),
+                                token_address_4: self.token_address_input_4.clone(),
                             };
                             write_config(config);
                         }
                     }
                 });
+                if self.invalid_address_popup {
+                    egui::Window::new("Invalid Address").show(ctx, |ui| {
+                        ui.label("One or more addresses are invalid.");
+                        if ui.button("Close").clicked() {
+                            self.invalid_address_popup = false;
+                        }
+                    });
+                }
             });
         });
     }
@@ -242,44 +318,69 @@ fn write_config(config: Config) {
         .expect("Failed to write data");
 }
 
-// async fn arbitrage() -> web3::Result<()> {
+fn begin_arbitrage(app: &mut App) {
+    let config: Config = App::get_config();
 
-//     let transport: Http = match match get_chain_from_config() {
-//         Ok(chain) => chain,
-//         Err(_) => Chain::Ethereum,
-//     } {
-//         Chain::Ethereum => web3::transports::http::Http::new("https://rpc.api.moonbeam.network")?,
-//         Chain::Polygon => web3::transports::http::Http::new("https://rpc.api.moonbeam.network")?,
-//         Chain::Binance => web3::transports::http::Http::new("https://rpc.api.moonbeam.network")?,
-//     };
-//     let web3: Web3<Http> = web3::Web3::new(transport);
-//     let config = get_config().expect("expected a config file");
+    let transport: Http = match config.chain {
+        Chain::Ethereum => {
+            web3::transports::http::Http::new("https://rpc.api.moonbeam.network").unwrap()
+        }
+        Chain::Polygon => {
+            web3::transports::http::Http::new("https://rpc.api.moonbeam.network").unwrap()
+        }
+        Chain::Binance => {
+            web3::transports::http::Http::new("https://rpc.api.moonbeam.network").unwrap()
+        }
+    };
+    let web3: Web3<Http> = web3::Web3::new(transport);
 
+    let valid_bools: HashMap<String, bool> = check_valid_addresses(vec![
+        config.contract_address,
+        config.token_address_1,
+        config.token_address_2,
+        config.token_address_3,
+        config.token_address_4,
+    ]);
+
+    if valid_bools.values().any(|&val| !val) {
+        app.invalid_address_popup = true;
+        return;
+    }
+}
+
+// async fn arbitrage(
+//     config: Config,
+//     web3: Web3<Http>,
+// ) -> web3::Result<()> {
 //     loop {
-//         let pair_address = get_pair_address(&web3, &config.token_address_1, &config.token_address_2).await?;
-//         // Get prices from two different DEXes
-//         let price_1 = get_price(&web3, &pair_address).await?;
-//         let price_2 = get_price(&web3, &pair_address).await?;
-
-//         // Check for arbitrage opportunity
-//         if price_1 < price_2 {
-//             execute_trade(&web3, &config.token_address_1, &config.token_address_2, price_1).await?;
-//         } else if price_2 < price_1 {
-//             execute_trade(&web3, &config.token_address_1, &config.token_address_2, price_2).await?;
+//         let pair_addresses = get_pair_addresses(&web3, config).await?;
+        
+//         let (price_1, price_2) = tokio::try_join!(
+//             get_price(&web3, pair_addresses),
+//             get_price(&web3, &pair_address, config.token_2, config.token_1),
+//         )?;
+        
+//         let fee_adjusted_price_1 = price_1 * (1.0 - config.transaction_fee);
+//         let fee_adjusted_price_2 = price_2 * (1.0 - config.transaction_fee);
+        
+//         if fee_adjusted_price_1 > fee_adjusted_price_2 {
+//             let tx1 = execute_trade(&web3, &pair_address, config.token_1, config.token_2, price_1).await?;
+//             wait_for_transaction(&web3, tx1).await?;
+//         } else if fee_adjusted_price_2 > fee_adjusted_price_1 {
+//             let tx2 = execute_trade(&web3, &pair_address, config.token_2, config.token_1, price_2).await?;
+//             wait_for_transaction(&web3, tx2).await?;
 //         }
 
-//         tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+//         tokio::time::sleep(tokio::time::Duration::from_secs(config.refresh_interval)).await;
 //     }
-
-//     Ok(())
 // }
 
-// async fn get_pair_address(
-//     web3: &Web3<Http>,
-//     token_a: &Address,
-//     token_b: &Address,
-// ) -> web3::Result<Address> {
-//     let factory_address: Address = UNISWAP_FACTORY_ADDRESS.parse()?;
+
+// async fn get_pair_addresses(web3: &Web3<Http>, config: Config) -> web3::Result<Address> {
+//     let factory_address: H160 = match H160::from_str(config.contract_address.as_str()) {
+//         Ok(val) => val,
+//         Err(_) => {}
+//     };
 //     let factory_contract = Contract::from_json(
 //         web3.eth(),
 //         factory_address,
@@ -287,13 +388,18 @@ fn write_config(config: Config) {
 //     );
 
 //     let result: Address = factory_contract
-//         .query("getPair", (token_a, token_b), None, Options::default(), None)
+//         .query(
+//             "getPair",
+//             (config.token_address_1, config.token_address_2),
+//             None,
+//             Options::default(),
+//             None,
+//         )
 //         .await?;
 //     Ok(result)
 // }
 
 // async fn get_price(web3: &Web3<Http>, pair_address: &Address) -> web3::Result<U256> {
-//     // Assuming the pair address is known. In reality, you might need another function to fetch this.
 
 //     let pair_contract = Contract::from_json(
 //         web3.eth(),
@@ -306,8 +412,6 @@ fn write_config(config: Config) {
 //         .await?;
 //     let (reserve_eth, reserve_token, _timestamp) = result;
 
-//     // Calculate price as reserve ratio
-//     // This is a simplistic representation, consider slippage and other factors in real scenarios.
 //     Ok(reserve_eth / reserve_token)
 // }
 
@@ -352,3 +456,14 @@ fn write_config(config: Config) {
 
 //     Ok(())
 // }
+
+fn check_valid_addresses(address_strs: Vec<String>) -> HashMap<String, bool> {
+    let mut results = HashMap::new();
+
+    for addr in address_strs.iter() {
+        let is_valid = addr.parse::<Address>().is_ok();
+        results.insert(addr.clone(), is_valid);
+    }
+
+    return results;
+}
