@@ -2,11 +2,10 @@
   "chain": "Ethereum",
   "contract_address": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
   "private_key": "0000000000000000000000000000000000000000000000000000000000000000",
-  "token_address_1": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-  "token_address_2": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-  "token_address_3": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-  "token_address_4": "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",
+  "token_address_master": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  "token_address_1": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+  "token_address_2": "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",
   "gas_limit": 100000.0,
-  "slippage_threshhold": 0.5,
+  "slippage_threshhold": 1.0,
   "minimum_profit": 10.0
 }
