@@ -154,8 +154,10 @@ dependencies = [
  "egui",
  "hex",
  "hex-literal",
+ "secp256k1",
  "serde",
  "serde_json",
+ "tiny-keccak",
  "tokio",
  "web3",
 ]

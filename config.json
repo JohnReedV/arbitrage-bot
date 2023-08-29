@@ -1,11 +1,13 @@
 {
   "chain": "Ethereum",
-  "contract_address": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
-  "private_key": "0000000000000000000000000000000000000000000000000000000000000000",
-  "token_address_master": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-  "token_address_1": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-  "token_address_2": "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",
-  "gas_limit": 100000.0,
-  "slippage_threshhold": 1.0,
-  "minimum_profit": 10.0
+  "contract_address": "0x0227628f3F023bb0B980b67D528571c95c6DaC1c",
+  "private_key": "898243cb04cdc5f178418d8e726cf96fd75b1e6663268aa1e70f1ca2c37472e0",
+  "public_key": "0x488ddef50e9ed50340775a54606794ac89926240",
+  "token_address_master": "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
+  "token_address_1": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+  "token_address_2": "0x26f317FEF4E157D82C5D07eBCD053c14F659F027",
+  "gas_limit": 1000.0,
+  "slippage_threshhold": 1000.0,
+  "minimum_profit": 100.0,
+  "amount_to_trade": 0.01
 }
