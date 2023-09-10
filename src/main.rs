@@ -1,4 +1,7 @@
 use eframe::egui;
+use hex::FromHex;
+use reqwest::Client;
+use secp256k1::{PublicKey, Secp256k1};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -7,14 +10,16 @@ use std::{
     io::{Error, Write},
     str::FromStr,
 };
-
+use tiny_keccak::{Hasher, Keccak};
 use web3::{
     contract::{Contract, Options},
+    ethabi::Token,
     signing::SecretKey,
     transports::Http,
-    types::{Address, Bytes, CallRequest, H160, H256, U256},
+    types::{Address, TransactionReceipt, H160, H256, U256},
     Web3,
 };
+
 #[tokio::main]
 async fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
@@ -27,10 +32,6 @@ async fn main() -> Result<(), eframe::Error> {
         Box::new(|_| Box::new(App::new())),
     )
 }
-
-use hex::FromHex;
-use secp256k1::{PublicKey, Secp256k1};
-use tiny_keccak::{Hasher, Keccak};
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Default)]
 enum Chain {
@@ -59,7 +60,7 @@ struct Config {
     token_address_master: String,
     token_address_1: String,
     token_address_2: String,
-    gas_limit: f64,
+    gas_limit: u64,
     slippage_threshhold: f64,
     minimum_profit: f64,
     amount_to_trade: f64,
@@ -75,7 +76,7 @@ impl Config {
             token_address_master: String::new(),
             token_address_1: String::new(),
             token_address_2: String::new(),
-            gas_limit: 0.0,
+            gas_limit: 0,
             slippage_threshhold: 0.0,
             minimum_profit: 0.0,
             amount_to_trade: 0.0,
@@ -110,7 +111,7 @@ impl TempValues {
             temp_gas_limit: String::from("0"),
             temp_slippage_threshhold: String::from("0"),
             temp_minimum_profit: String::from("0"),
-            temp_amount_to_trade: String::from("0"),
+            temp_amount_to_trade: String::from("0.0"),
         }
     }
 
@@ -146,7 +147,7 @@ struct App {
     show_minimum_profit_error: bool,
     show_amount_to_trade_error: bool,
     invalid_private_key: bool,
-    gas_limit: f64,
+    gas_limit: u64,
     slippage_threshhold: f64,
     minimum_profit: f64,
     amount_to_trade: f64,
@@ -170,7 +171,7 @@ impl App {
             show_minimum_profit_error: false,
             invalid_private_key: false,
             show_amount_to_trade_error: false,
-            gas_limit: 0.0,
+            gas_limit: 0,
             slippage_threshhold: 0.0,
             minimum_profit: 0.0,
             amount_to_trade: 0.0,
@@ -347,7 +348,7 @@ impl eframe::App for App {
                             }
 
                             if !self.temp.temp_gas_limit.is_empty() {
-                                match self.temp.temp_gas_limit.parse::<f64>() {
+                                match self.temp.temp_gas_limit.parse::<u64>() {
                                     Ok(num) => {
                                         self.gas_limit = num;
                                     }
@@ -478,12 +479,10 @@ fn begin_arbitrage(app: &mut App) {
     let config: Config = App::get_config();
 
     let transport: Http = match config.chain {
-        Chain::Ethereum => {
-            web3::transports::http::Http::new(
-                "https://sepolia.infura.io/v3/f679762894d44f4e88b1a37fbf30282b",
-            )
-            .unwrap() // https://ethereum.blockpi.network/v1/rpc/public
-        }
+        Chain::Ethereum => web3::transports::http::Http::new( "http://127.0.0.1:8545"
+            /*"https://mainnet.infura.io/v3/f679762894d44f4e88b1a37fbf30282b"*/,
+        )
+        .unwrap(),
         Chain::Polygon => {
             web3::transports::http::Http::new("https://polygon.blockpi.network/v1/rpc/public")
                 .unwrap()
@@ -515,8 +514,10 @@ fn begin_arbitrage(app: &mut App) {
 }
 
 async fn arbitrage(config: Config, web3: Web3<Http>) -> web3::Result<()> {
-    let (price_pair_1, pool_address_1) = get_price_and_pool_address(&web3, &config, 1).await?;
-    let (price_pair_2, pool_address_2) = get_price_and_pool_address(&web3, &config, 2).await?;
+    let (price_pair_1_f64, price_pair_1, pool_address_1) =
+        get_price_and_pool_address(&web3, &config, 1).await?;
+    let (price_pair_2_f64, price_pair_2, pool_address_2) =
+        get_price_and_pool_address(&web3, &config, 2).await?;
 
     let profitable = is_arbitrage_profitable(
         &web3,
@@ -524,19 +525,21 @@ async fn arbitrage(config: Config, web3: Web3<Http>) -> web3::Result<()> {
         pool_address_2,
         price_pair_1,
         price_pair_2,
+        price_pair_1_f64,
+        price_pair_2_f64,
         &config,
     )
     .await;
 
-    let tx_hash;
+    //let tx_hash;
     if profitable {
-        tx_hash = execute_trade(&web3, &config, pool_address_1, price_pair_1).await;
+        //tx_hash = execute_trade(&web3, &config, pool_address_1, price_pair_1).await;
     } else {
         println!("Exiting: Profit below threshold");
         return Ok(());
     }
 
-    println!("Transaction 1 Hash: {:#?}", tx_hash);
+    // println!("Transaction 1 Hash: {:#?}", tx_hash);
 
     Ok(())
 }
@@ -545,6 +548,8 @@ async fn is_arbitrage_profitable(
     web3: &Web3<Http>,
     pool_address_a: H160,
     pool_address_b: H160,
+    price_pair_1: U256,
+    price_pair_2: U256,
     price_a_eth: f64,
     price_b_eth: f64,
     config: &Config,
@@ -553,27 +558,27 @@ async fn is_arbitrage_profitable(
     let mut cost_a_to_b: f64;
 
     if let Ok(transaction_fee_a_to_b) =
-    estimate_swap_fee(web3, &config, pool_address_a, price_a_eth).await
+        estimate_swap_fee(web3, &config, pool_address_a, price_pair_1).await
     {
         let fee_multiplier_a_to_b = 1.0 - (transaction_fee_a_to_b / 100.0);
 
         cost_a_to_b =
             price_a_eth * (price_b_eth * fee_multiplier_a_to_b).recip() * fee_multiplier_a_to_b;
         cost_a_to_b *= 1.0 + config.slippage_threshhold / 100.0;
-        cost_a_to_b += config.gas_limit;
+        cost_a_to_b += config.gas_limit as f64;
     } else {
         return false;
     }
 
     if let Ok(transaction_fee_b_to_a) =
-    estimate_swap_fee(web3, &config, pool_address_b, price_b_eth).await
+        estimate_swap_fee(web3, &config, pool_address_b, price_pair_2).await
     {
         let fee_multiplier_b_to_a = 1.0 - (transaction_fee_b_to_a / 100.0);
         cost_b_to_a =
             price_b_eth * (price_a_eth * fee_multiplier_b_to_a).recip() * fee_multiplier_b_to_a;
 
         cost_b_to_a *= 1.0 + config.slippage_threshhold / 100.0;
-        cost_b_to_a += config.gas_limit;
+        cost_b_to_a += config.gas_limit as f64;
     } else {
         return false;
     }
@@ -597,57 +602,151 @@ async fn execute_trade(
     let pool_contract = Contract::new(web3.eth(), pool_address, pool_abi);
 
     let amount: U256 = f64_to_u256(config.amount_to_trade);
-    let tx = pool_contract
+
+    let result: Result<H256, web3::Error> = pool_contract
         .signed_call(
             "swap",
             (
-                pool_address,
-                true,
-                amount,
-                calculate_sqrt_price_limit(price),
+                Token::Address(config.public_key),
+                Token::Bool(true),
+                Token::Int(amount),
+                Token::Uint(calculate_sqrt_price_limit(price).into()),
+                Token::Bytes(Vec::new()),
             ),
             web3::contract::Options::default(),
             &prvk,
         )
         .await
-        .map_err(|e| {
-            web3::Error::InvalidResponse(format!("Factory contract query failed: {:?}", e))
-        });
+        .map_err(|e| web3::Error::InvalidResponse(format!("Failed to send: {}", e)));
 
-    return tx;
+    match &result {
+        Ok(tx_hash) => {
+            let bytes = tx_hash.0;
+            println!("Transaction hash as bytes: {:?}", bytes);
+
+            let hex = tx_hash.to_string();
+            println!("Transaction hash as hex: {}", hex);
+        }
+        Err(e) => {
+            println!("Error: {}", e);
+        }
+    }
+
+    return result;
 }
 
 async fn estimate_swap_fee(
     web3: &Web3<Http>,
     config: &Config,
     pool_address: Address,
-    price: f64,
+    current_sqrt_price: U256,
 ) -> Result<f64, web3::Error> {
-    let sqrt_price_limit = calculate_sqrt_price_limit(price);
-
+    let prvk = SecretKey::from_str(&config.private_key).unwrap();
     let pool_file = File::open("./pool_abi.json").unwrap();
     let pool_abi = web3::ethabi::Contract::load(pool_file).unwrap();
     let pool_contract = Contract::new(web3.eth(), pool_address, pool_abi);
-    let amount: U256 = f64_to_u256(config.amount_to_trade);
 
-    let gas_price = pool_contract
-        .estimate_gas(
-            "swap",
-            (pool_address, true, amount, sqrt_price_limit),
-            config.public_key,
-            Options::default(),
+    let min_sqrt_ratio: U256 = U256::from_dec_str("4295128739").unwrap();
+    if current_sqrt_price <= min_sqrt_ratio {
+        return Err(web3::Error::InvalidResponse("Invalid sqrtPriceX96".into()));
+    }
+    let delta: U256 = U256::from(10);
+    let sqrt_price_limit_x96: U256 = current_sqrt_price.saturating_sub(delta);
+
+    let mut options = web3::contract::Options::default();
+    options.gas = Some(config.gas_limit.into());
+
+    let approval = approve_erc20(&web3, &config).await;
+
+    match approval {
+        Ok(_) => {
+            let result: Result<TransactionReceipt, web3::Error> = pool_contract
+                .signed_call_with_confirmations(
+                    "swap",
+                    (
+                        Token::Address(config.public_key),
+                        Token::Bool(true),
+                        Token::Int(f64_to_u256(config.amount_to_trade)),
+                        Token::Uint(sqrt_price_limit_x96),
+                        Token::Bytes(Vec::new()),
+                    ),
+                    options,
+                    1,
+                    &prvk,
+                )
+                .await
+                .map_err(|e| web3::Error::InvalidResponse(format!("Failed to send: {}", e)));
+
+            match &result {
+                Ok(tx_hash) => {
+                    println!("Transaction hash as hex: {:#?}", tx_hash);
+                }
+                Err(e) => {
+                    println!("Error: {}", e);
+                }
+            }
+        }
+        Err(why) => {
+            web3::Error::InvalidResponse(format!("Failed to approve: {}", why));
+        }
+    }
+
+    return Ok(0.0);
+}
+
+async fn approve_erc20(web3: &Web3<Http>, config: &Config) -> web3::Result<()> {
+    let prvk = SecretKey::from_str(&config.private_key).unwrap();
+    let erc20_file = File::open("./erc20_abi.json").unwrap();
+    let erc20_abi = web3::ethabi::Contract::load(erc20_file).unwrap();
+
+    let contract1 = Contract::new(
+        web3.eth(),
+        H160::from_str(config.token_address_1.as_str()).unwrap(),
+        erc20_abi.clone(),
+    );
+    // let contract2 = Contract::new(
+    //     web3.eth(),
+    //     H160::from_str(config.token_address_2.as_str()).unwrap(),
+    //     erc20_abi.clone(),
+    // );
+
+    let approve_params = (
+        Token::Address(config.public_key),
+        Token::Uint(f64_to_u256(config.amount_to_trade)),
+    );
+
+    let tx_hash1 = contract1
+        .signed_call_with_confirmations(
+            "approve",
+            approve_params.clone(),
+            Default::default(),
+            1,
+            &prvk,
         )
         .await
-        .map_err(|e| web3::Error::InvalidResponse(format!("Failed to estimate gas: {:?}", e)))?;
-        println!("{}", u256_to_f64(gas_price));
-    Ok(u256_to_f64(gas_price))
+        .map_err(|e| web3::Error::InvalidResponse(format!("Approval 1 failed: {}", e)));
+
+    // let tx_hash2 = contract2
+    //     .call(
+    //         "approve",
+    //         approve_params.clone(),
+    //         config.public_key,
+    //         Default::default(),
+    //     )
+    //     .await
+    //     .map_err(|e| web3::Error::InvalidResponse(format!("Approval 2 failed: {}", e)));
+
+    println!("Transaction 1 Hash: {:?}", tx_hash1);
+    //println!("Transaction 2 Hash: {:?}", tx_hash2);
+
+    Ok(())
 }
 
 async fn get_price_and_pool_address(
     web3: &Web3<Http>,
     config: &Config,
     pair_id: u8,
-) -> web3::Result<(f64, Address)> {
+) -> web3::Result<(f64, U256, Address)> {
     let (token_a, token_b) = match pair_id {
         1 => (&config.token_address_master, &config.token_address_1),
         2 => (&config.token_address_master, &config.token_address_2),
@@ -721,7 +820,7 @@ async fn get_price_and_pool_address(
     let price = sqrt_price * sqrt_price;
     let adj_price = price / 10_f64.powi(decimals_token1 as i32 - decimals_token2 as i32);
 
-    Ok((adj_price, pool_address))
+    Ok((adj_price, sqrt_price_x96, pool_address))
 }
 
 fn check_valid_addresses(address_strs: Vec<&String>) -> HashMap<&String, bool> {
@@ -795,12 +894,17 @@ pub fn priv_key_to_pub_key(private_key: &String) -> Result<Address, &'static str
 fn f64_to_u256(val: f64) -> U256 {
     let val_str = val.to_string();
     let parts: Vec<&str> = val_str.split('.').collect();
-
     let int_part: U256 = parts[0].parse::<U256>().unwrap();
+    let decimal_part_str: String;
 
-    let decimal_part_str = format!("0.{}", parts[1]);
+    if parts.len() > 1 {
+        decimal_part_str = format!("0.{}", parts[1]);
+    } else {
+        decimal_part_str = "0.0".to_string();
+    }
+
     let decimal_part_f64: f64 = decimal_part_str.parse().unwrap();
     let decimal_part_u256: U256 = ((decimal_part_f64 * 1e18).round() as u64).into();
 
-    int_part * U256::exp10(18) + decimal_part_u256 // again, adjust scaling as needed
+    int_part * U256::exp10(18) + decimal_part_u256
 }
